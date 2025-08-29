@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SYNOP Polska — FM-12 (ikony z WorldWeatherSymbols CDN)</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+:root{
+  --fg:#101218; --muted:#556276; --panel:#ffffffee; --border:#dfe3ea;
+  --btn:#f6f8fb; --btnbr:#cfd6e2; --t:#d31f2b; --p:#111;
+  --up:#1460ff; --down:#d31f2b;
+}
+html,body{height:100%;margin:0;background:#fff;color:var(--fg);font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+#map{position:fixed;inset:0}
+
+/* panel */
+#toggle{position:fixed;left:10px;top:10px;z-index:10000;background:var(--btn);border:1px solid var(--btnbr);border-radius:999px;padding:8px 12px;cursor:pointer}
+#panel{position:fixed;left:10px;top:56px;z-index:9999;max-width:520px;display:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 26px #0002;padding:10px}
+#panel.show{display:block}
+h3{margin:0 0 6px 0;font-size:15px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pill{display:inline-flex;gap:6px;align-items:center;background:var(--btn);border:1px solid var(--btnbr);color:var(--muted);border-radius:999px;padding:3px 8px;font-size:12px}
+input[type="url"]{width:100%;box-sizing:border-box;background:#fff;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:8px}
+.btn{background:var(--btn);border:1px solid var(--btnbr);color:var(--fg);border-radius:10px;padding:7px 10px;cursor:pointer}
+.small{font-size:12px;color:var(--muted)} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.no-pad .leaflet-marker-icon{margin:0!important}
+
+/* znacznik stacji (krążek mniejszy, jak u Ciebie wcześniej) */
+.stn{position:relative;width:96px;height:76px;pointer-events:none}
+.stn .txt{position:absolute;white-space:nowrap;text-shadow:0 1px 0 #fff,0 0 2px #fff}
+
+/* chmury: CH czerwone; CM/CL/N normalne – bez pogrubienia */
+.stn img.ch,.stn img.cm,.stn img.cl,.stn img.n{filter:none;image-rendering:auto}
+.stn .ch{position:absolute;left:50%;top:0px;margin-left:-9px;width:18px;height:18px;z-index:4;
+  filter: invert(18%) sepia(94%) saturate(6176%) hue-rotate(358deg) brightness(95%) contrast(105%);
+}
+.stn .cm{position:absolute;left:50%;top:17px;margin-left:-9px;width:18px;height:18px;z-index:4}
+.stn .cl{position:absolute;left:50%;top:44px;margin-left:-9px;width:18px;height:18px;z-index:4}
+.stn .n {position:absolute;left:50%;top:50%;width:14px;height:14px;margin-left:-7px;margin-top:-7px;z-index:3}
+
+/* górny wiersz: T i Ps (3 cyfry) */
+.stn .tt {left:6px;  top:15px;color:var(--t); font-size:12px; font-weight:800}
+.stn .ppp{right:6px; top:14px;color:var(--p); font-size:12px;text-align:right; font-weight:800}
+
+/* środek: VV/ww, N, a+ppp */
+.stn .vv {left:6px; top:31px; color:var(--p); font-size:12px; font-weight:800}
+.stn .ww {position:absolute;left:22px;top:28px;width:16px;height:16px;z-index:4}
+.stn .icao1{position:absolute;left:6px; top:28px;width:12px;height:12px;z-index:4}
+.stn .icao2{position:absolute;left:38px;top:28px;width:12px;height:12px;z-index:4}
+.stn .aBox{position:absolute;right:6px;top:30px;display:flex;align-items:center;gap:2px;z-index:4}
+.stn .aicon{width:12px;height:12px}
+.stn .aval{font-size:11px;text-shadow:0 1px 0 #fff,0 0 2px #fff; font-weight:800}
+.a-up .aval{color:var(--up)} .a-down .aval{color:var(--down)} .a-flat .aval{color:var(--p)}
+.a-up .aicon{filter: invert(33%) sepia(94%) saturate(2552%) hue-rotate(205deg)}
+.a-down .aicon{filter: invert(18%) sepia(100%) saturate(7333%) hue-rotate(358deg)}
+
+/* dół: Td, W1/W2, Nh/8 i podstawa – obniżone */
+.stn .td   {left:6px;top:50px;color:var(--t); font-size:12px; font-weight:800}
+.stn .w1   {position:absolute;right:6px; top:48px;width:16px;height:16px;z-index:4}
+.stn .w2   {position:absolute;right:26px;top:48px;width:16px;height:16px;z-index:4}
+.stn .nh   {left:50%;transform:translateX(-50%);bottom:4px;color:var(--p);font-size:12px; font-weight:800}
+.stn .base {left:50%;transform:translateX(-50%);bottom:-10px;color:var(--p);font-size:11px; font-weight:800}
+
+/* WIATR — SVG */
+.stn .barb {position:absolute;inset:0;z-index:2; pointer-events:none}
+.stn .barb svg{width:100%;height:100%}
+
+/* ====== KOLORY ww ====== */
+.wx-green    { filter: invert(36%) sepia(92%) saturate(1081%) hue-rotate(87deg)  brightness(92%) contrast(96%) !important; }
+.wx-lightblue{ filter: invert(66%) sepia(8%)  saturate(1510%) hue-rotate(173deg) brightness(102%) contrast(94%) !important; }
+.wx-darkblue { filter: invert(12%) sepia(91%) saturate(2732%) hue-rotate(212deg) brightness(88%) contrast(101%) !important; }
+.wx-mint     { filter: invert(71%) sepia(13%) saturate(946%)  hue-rotate(91deg)  brightness(94%) contrast(95%) !important; }
+.wx-yellow   { filter: invert(78%) sepia(65%) saturate(517%)  hue-rotate(355deg) brightness(102%) contrast(95%) !important; }
+.wx-bordeaux { filter: invert(9%)  sepia(49%) saturate(3132%) hue-rotate(325deg) brightness(85%) contrast(102%) !important; }
+.wx-red      { filter: invert(18%) sepia(94%) saturate(6176%) hue-rotate(358deg) brightness(95%) contrast(105%) !important; }
+.wx-brown    { filter: invert(25%) sepia(51%) saturate(548%)  hue-rotate(6deg)   brightness(92%) contrast(98%) !important; }
+
+.leaflet-popup-content{font-family:ui-monospace,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<button id="toggle">☰ Panel</button>
+<div id="panel">
+  <h3>SYNOP Polska — FM-12 (ikony z <span class="mono">OGCMetOceanDWG/WorldWeatherSymbols</span>)</h3>
+  <div class="small">Jeśli Ogimet nie zwróci danych, skrypt cofnie się do 6 poprzednich godzin UTC.</div>
+  <div class="row" style="margin-top:8px"><label class="pill"><input id="useProxy" type="checkbox" checked> Proxy CORS</label></div>
+  <div class="row" style="margin-top:8px"><input id="url" type="url" placeholder="URL getsynop – auto"/></div>
+  <div class="row" style="margin-top:6px"><button id="btnFetch" class="btn">Pobierz</button><button id="btnClear" class="btn">Wyczyść</button></div>
+
+  <div class="small" style="margin-top:10px">Plik AAXX (offline)</div>
+  <div class="row" style="margin-top:4px"><input id="fileAAXX" type="file" accept=".txt,.htm,.html,.log"/><button id="btnParseAAXX" class="btn">Dekoduj AAXX</button></div>
+
+  <div class="small" style="margin-top:10px">Opcj. JSON WMO→{name,lat,lon}</div>
+  <div class="row" style="margin-top:4px"><input id="fileWMO" type="file" accept=".json"/><button id="btnLoadWMO" class="btn">Wczytaj</button></div>
+
+  <div id="status" class="small mono" style="margin-top:10px">—</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ===== helpers/UI ===== */
+const $=id=>document.getElementById(id);
+$("toggle").onclick=()=>$("panel").classList.toggle("show");
+$("toggle").addEventListener("touchend",e=>{e.preventDefault();$("panel").classList.toggle("show")},{passive:false});
+const setStatus=s=>{$("status").textContent=s;};
+
+/* ===== MAPA (jasny podkład) ===== */
+const map = L.map("map", { attributionControl:false }).setView([52.1,19.4], 6);
+const tileCandidates = [
+  { url:"https://{s}.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    opts:{subdomains:["server","services"], maxZoom:18} },
+  { url:"https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    opts:{subdomains:"abcd", maxZoom:19} },
+  { url:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    opts:{maxZoom:19} }
+];
+let idx=0;
+(function tryTiles(){
+  if(idx>=tileCandidates.length){ setStatus("Nie udało się załadować kafelków."); return; }
+  const c=tileCandidates[idx++], tl=L.tileLayer(c.url,c.opts);
+  let ok=false;
+  tl.on("tileload",()=>{ if(!ok){ok=true; setStatus("Mapa OK.");}});
+  tl.on("tileerror",()=>{ if(!ok){ map.removeLayer(tl); tryTiles(); }});
+  tl.addTo(map);
+})();
+const layer = L.layerGroup().addTo(map);
+
+/* ===== stacje PL (Twoja lista – skrócona dla przykładu; zostaw własną) ===== */
+const PRESET_PL=[{"wmo":"12001","name":"PETROBALTIC BETA","lat":55.48056,"lon":18.1825},{"wmo":"12100","name":"KOŁOBRZEG","lat":54.18222,"lon":15.57944},{"wmo":"12105","name":"KOSZALIN","lat":54.20417,"lon":16.15528},{"wmo":"12115","name":"USTKA","lat":54.58806,"lon":16.85417},{"wmo":"12120","name":"ŁEBA","lat":54.75333,"lon":17.53444},{"wmo":"12125","name":"LĘBORK","lat":54.55306,"lon":17.75667},{"wmo":"12135","name":"HEL","lat":54.60333,"lon":18.81167},{"wmo":"12155","name":"GDAŃSK-ŚWIBNO","lat":54.33333,"lon":18.93417},{"wmo":"12160","name":"ELBLĄG","lat":54.22306,"lon":19.54306},{"wmo":"12185","name":"KĘTRZYN","lat":54.06806,"lon":21.36806},{"wmo":"12195","name":"SUWAŁKI","lat":54.13056,"lon":22.94889},{"wmo":"12200","name":"ŚWINOUJŚCIE","lat":53.92306,"lon":14.24194},{"wmo":"12205","name":"SZCZECIN","lat":53.39528,"lon":14.62278},{"wmo":"12210","name":"RESKO","lat":53.76333,"lon":15.39306},{"wmo":"12215","name":"SZCZECINEK","lat":53.71444,"lon":16.74667},{"wmo":"12230","name":"PIŁA","lat":53.13083,"lon":16.74806},{"wmo":"12235","name":"CHOJNICE","lat":53.71528,"lon":17.53222},{"wmo":"12250","name":"TORUŃ","lat":53.04194,"lon":18.59528},{"wmo":"12270","name":"MŁAWA","lat":53.10417,"lon":20.36083},{"wmo":"12272","name":"OLSZTYN","lat":53.77083,"lon":20.42278},{"wmo":"12280","name":"MIKOŁAJKI","lat":53.78917,"lon":21.58833},{"wmo":"12285","name":"OSTROŁĘKA","lat":53.0675,"lon":21.53528},{"wmo":"12295","name":"BIAŁYSTOK","lat":53.10806,"lon":23.17194},{"wmo":"12300","name":"GORZÓW WIELKOPOLSKI","lat":52.74083,"lon":15.27694},{"wmo":"12310","name":"SŁUBICE","lat":52.34833,"lon":14.59389},{"wmo":"12330","name":"POZNAŃ","lat":52.41667,"lon":16.83444},{"wmo":"12360","name":"PŁOCK","lat":52.58806,"lon":19.72556},{"wmo":"12375","name":"WARSZAWA-OKĘCIE","lat":52.16278,"lon":20.96083},{"wmo":"12385","name":"SIEDLCE","lat":52.18083,"lon":22.24444},{"wmo":"12399","name":"TERESPOL","lat":52.07833,"lon":23.62167},{"wmo":"12400","name":"ZIELONA GÓRA","lat":51.93028,"lon":15.52417},{"wmo":"12415","name":"LEGNICA BARTOSZÓW","lat":51.19306,"lon":16.20722},{"wmo":"12418","name":"LESZNO-STRZYŻEWICE","lat":51.83556,"lon":16.53444},{"wmo":"12424","name":"WROCŁAW","lat":51.10306,"lon":16.89972},{"wmo":"12435","name":"KALISZ","lat":51.78167,"lon":18.08167},{"wmo":"12455","name":"WIELUŃ","lat":51.21083,"lon":18.55778},{"wmo":"12465","name":"ŁÓDŹ","lat":51.72306,"lon":19.39917},{"wmo":"12469","name":"SULEJÓW","lat":51.35306,"lon":19.86639},{"wmo":"12488","name":"KOZIENICE","lat":51.56444,"lon":21.54333},{"wmo":"12495","name":"LUBLIN RADAWIEC","lat":51.21667,"lon":22.39306},{"wmo":"12497","name":"WŁODAWA","lat":51.55306,"lon":23.52917},{"wmo":"12500","name":"JELENIA GÓRA","lat":50.90028,"lon":15.78889},{"wmo":"12510","name":"ŚNIEŻKA","lat":50.73583,"lon":15.73917},{"wmo":"12520","name":"KŁODZKO","lat":50.43667,"lon":16.61417},{"wmo":"12530","name":"OPOLE","lat":50.62667,"lon":17.96889},{"wmo":"12540","name":"RACIBÓRZ","lat":50.06167,"lon":18.19167},{"wmo":"12550","name":"CZĘSTOCHOWA","lat":50.8125,"lon":19.0925},{"wmo":"12560","name":"KATOWICE","lat":50.24056,"lon":19.03278},{"wmo":"12566","name":"KRAKÓW","lat":50.08028,"lon":19.80167},{"wmo":"12570","name":"KIELCE","lat":50.81028,"lon":20.69194},{"wmo":"12575","name":"TARNÓW","lat":50.03,"lon":20.98417},{"wmo":"12580","name":"RZESZÓW-JASIONKA","lat":50.11139,"lon":22.01972},{"wmo":"12585","name":"SANDOMIERZ","lat":50.69667,"lon":21.71556}];
+let WMO_MAP=new Map(); PRESET_PL.forEach(o=>WMO_MAP.set(String(o.wmo).padStart(5,"0"),{name:o.name,lat:o.lat,lon:o.lon}));
+
+/* ===== URL Ogimet (ostatnia pełna UTC) ===== */
+function hourStamp(dateUTC){
+  const YYYY=dateUTC.getUTCFullYear();
+  const MM=String(dateUTC.getUTCMonth()+1).padStart(2,"0");
+  const DD=String(dateUTC.getUTCDate()).padStart(2,"0");
+  const HH=String(dateUTC.getUTCHours()).padStart(2,"0");
+  return `${YYYY}${MM}${DD}${HH}00`;
+}
+function getsynopUrl(dtUTC){
+  const begin=hourStamp(dtUTC);
+  return `https://www.ogimet.com/cgi-bin/getsynop?begin=${begin}&state=Pol&lang=eng`;
+}
+(function initDefaultUrl(){
+  const now=new Date();
+  const t=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate(),now.getUTCHours(),0,0));
+  if(now.getUTCMinutes()<59) t.setUTCHours(t.getUTCHours()-1);
+  $("url").value=getsynopUrl(t);
+})();
+
+/* ===== pobieranie z proxy ===== */
+async function fetchWithProxy(url,useProxy){
+  const tries = useProxy ? [
+    "https://r.jina.ai/"+url.replace(/^https?:\/\//,"https://"),
+    "https://r.jina.ai/"+url.replace(/^https?:\/\//,"http://")
+  ] : [url];
+  let last="CORS/sieć";
+  for(const u of tries){
+    try{const r=await fetch(u,{cache:"no-store"}); if(r.ok) return await r.text(); last="HTTP "+r.status;}
+    catch(e){last=e.message;}
+  }
+  throw new Error(last);
+}
+
+/* ===== HTML→TXT + AAXX ===== */
+const toPlain=html=>String(html)
+  .replace(/<br\s*\/?>/gi,"\n")
+  .replace(/<\/(p|tr|div|li|h\d|pre|table|tbody|thead|td|th)>/gi,"\n")
+  .replace(/<[^>]*>/g,"")
+  .replace(/\u00A0/g," ");
+
+function extractAAXX(raw){
+  const txt=String(raw).replace(/\r/g,"\n");
+  const tokens=txt.split(/\s+/);
+  const blocks=[]; let cur=null;
+  for(const tok of tokens){
+    if(/^AAXX$/i.test(tok)){ if(cur&&cur.length) blocks.push(cur.join(" ")); cur=["AAXX"]; continue; }
+    if(tok==="="){ if(cur&&cur.length){ blocks.push(cur.join(" ")); cur=null; } continue; }
+    if(cur) cur.push(tok);
+  }
+  if(cur&&cur.length) blocks.push(cur.join(" "));
+  if(blocks.length===0){
+    const re=/AAXX[\s\S]*?(?:(?:^|\n)=|(?=\nAAXX)|(?=\naaxx)|$)/gim; let m;
+    while((m=re.exec(txt))!==null){ const b=m[0].replace(/\s+/g," ").replace(/\s*=\s*$/,"").trim(); if(b) blocks.push(b); }
+  }
+  if(blocks.length===0){
+    txt.split("=").forEach(seg=>{ const s=seg.replace(/\s+/g," ").trim(); if(/\bAAXX\b/i.test(s)&&/\d{5}/.test(s)) blocks.push(s); });
+  }
+  return blocks;
+}
+
+/* ===== dekoder FM-12 (jak wcześniej) ===== */
+function isYYGGiwLike(s){ if(!/^\d{5}$/.test(s)) return false; const dd=+s.slice(0,2),gg=+s.slice(2,4),iw=+s[4]; return dd>=0&&dd<=31&&gg>=0&&gg<=23&&iw>=0&&iw<=9; }
+function decodeAAXX(txt){
+  const tk=txt.split(/\s+/).filter(Boolean); if(!tk.length) return null;
+  const iT=tk.findIndex(isYYGGiwLike); if(iT<0) return null;
+  const YY=+tk[iT].slice(0,2), GG=+tk[iT].slice(2,4), iw=+tk[iT][4];
+  let iW=-1; const is5=s=>/^\d{5}$/.test(s);
+  if(iT>0&&is5(tk[iT-1])) iW=iT-1; else if(iT+1<tk.length&&is5(tk[iT+1])) iW=iT+1; else iW=tk.findIndex((s,i)=>is5(s)&&i!==iT);
+  if(iW<0) return null; const WMO=tk[iW];
+  const t=tk.filter((s,i)=>i!==iT&&i!==iW&&s.toUpperCase()!=="AAXX");
+
+  let iR=null,iX=null,h=null,VV=null;
+  if(t.length&&/^[0-9/]{5}$/.test(t[0])){ const g=t.shift(); iR=g[0]!=='/'?+g[0]:null; iX=g[1]!=='/'?+g[1]:null; h=g[2]!=='/'?+g[2]:null; VV=g.slice(3).replace('/',''); if(VV==="") VV=null; }
+  let N=null,dd=null,ff=null;
+  if(t.length&&/^[0-9/]{5}$/.test(t[0])){ const g=t.shift(); N=g[0]!=='/'?+g[0]:null; dd=g.slice(1,3).includes('/')?null:+g.slice(1,3); ff=g.slice(3,5).includes('/')?null:+g.slice(3,5); }
+
+  let T=null,Td=null,Pmsl=null,Ps=null,a=null,ppp=null,RRR=null,tr=null,ww=null,W1=null,W2=null,CL=null,CM=null,CH=null,Nh=null;
+  for(const g of t){
+    if(/^1[0-9/]{4}$/.test(g)){const s=g[1]==='/'?null:+g[1],v=g.slice(2).replace('/',''); if(v!==""){const num=+v/10; T=(s===1?-num:num);} }
+    else if(/^2[0-9/]{4}$/.test(g)){const s=g[1]==='/'?null:+g[1],v=g.slice(2).replace('/',''); if(v!==""){const num=+v/10; if(s===0||s===1) Td=(s===1?-num:num); else if(s>=2&&s<=5&&T!=null) Td=+(T-num).toFixed(1);} }
+    else if(/^3[0-9/]{4}$/.test(g)){const m=/^3([0-9/])([0-9/]{3})$/.exec(g); if(m&&!/[/]/.test(m[2])){const q=+m[2]/10; Pmsl=+((+m[2]<500?1000:900)+q).toFixed(1);} }
+    else if(/^4[0-9/]{4}$/.test(g)){const m=/^4([0-9/]{4})$/.exec(g); if(m&&!/[/]/.test(m[1])){const v=+m[1]; Ps=+((v<500?1000:900)+v/10).toFixed(1);} }
+    else if(/^5[0-9/]{4}$/.test(g)){ if(g[1]!=='/') a=+g[1]; if(!/[/]/.test(g.slice(2))) ppp=+g.slice(2); }
+    else if(/^6[0-9/]{4}$/.test(g)){ if(!/[/]/.test(g.slice(1,4))) RRR=+g.slice(1,4); if(g[4]!=='/') tr=+g[4]; }
+    else if(/^7[0-9/]{4}$/.test(g)){
+      const ww2 = g.slice(1,3);
+      ww = ww2.includes('/') ? null : +ww2;
+      W1 = g[3]==='/' ? null : +g[3];
+      W2 = g[4]==='/' ? null : +g[4];
+    }
+    else if(/^8[0-9/]{4}$/.test(g)){ Nh=g[1]==='/'?null:+g[1]; CL=g[2]==='/'?null:+g[2]; CM=g[3]==='/'?null:+g[3]; CH=g[4]==='/'?null:+g[4];}
+    else if(g==="333"||g==="555"){break;}
+  }
+  let ff_ms=null,ff_kt=null;
+  if(ff!=null){ ff_ms=ff; ff_kt=+(ff_ms*1.94384449).toFixed(1); }
+  return {YY,GG,iw,wmo:WMO,iR,iX,h,VV,N,dd,ff_ms,ff_kt,T,Td,Pmsl,Ps,a,ppp,RRR,tr,ww,W1,W2,CL,CM,CH,Nh, raw:txt};
+}
+
+/* ===== ikony: CDN WorldWeatherSymbols + fallback lokalny ===== */
+
+/* BAZA CDN (SVG) */
+const CDN_BASE = "https://cdn.jsdelivr.net/gh/OGCMetOceanDWG/WorldWeatherSymbols@master/symbols/";
+/* Fallback lokalny (PNG) – jeśli masz /storage/emulated/0/ww/ */
+const LOCAL_BASE = "file:///storage/emulated/0/ww/";
+
+/* Rozpoznanie katalogu po nazwie pliku (Twoje nazwy) i zamiana .png→.svg */
+function resolveSymbolUrl(filename){
+  const m = [
+    [/PresentWeatherAutomaticStation_wawa_/ , "wawa_PresentWeatherAutomaticStation"],
+    [/PresentWeather_ww_/                    , "ww_PresentWeather"],
+    [/PastWeatherAutomaticStation_Wa1Wa1_/   , "Wa1Wa1_PastWeatherAutomaticStation"],
+    [/PastWeather_W1W2_/                     , "W1W2_PastWeather"],
+    [/TotalCloudCover_N_/                    , "N_TotalCloudCover"],
+    [/CloudHigh_CH_/                         , "CH_CloudHigh"],
+    [/CloudMedium_CM_/                       , "CM_CloudMedium"],
+    [/CloudLow_CL_/                          , "CL_CloudLow"],
+    [/PressureTendencyCharacteristic_a_/     , "a_PressureTendencyCharacteristic"]
+  ];
+  for(const [re,folder] of m){
+    if(re.test(filename)){
+      const svg = filename.replace(/\.png$/i,".svg");
+      return CDN_BASE + folder + "/" + svg;
+    }
+  }
+  /* brak dopasowania (np. ikony ICAO) – spróbuj z lokalnego katalogu */
+  return LOCAL_BASE + filename;
+}
+
+const png = (name,cls)=>`<img class="${cls}" src="${resolveSymbolUrl(name)}" onerror="this.style.display='none'">`;
+const norm09 = c => (Number.isInteger(c) && c >= 0 && c <= 9) ? c : null;
+
+/* ===== kolorowanie ww (Twoje reguły) ===== */
+function wxClass(code){
+  if(code==null || isNaN(code)) return "";
+  const c = +code;
+
+  const GREEN = new Set([14,15,16,20,21,25,50,51,52,53,54,55,58,59,60,61,62,63,64,65,80,81,82,83,24]);
+  const RED   = new Set([13,17,18,19,87,88,89,90,91,92,93,94,95,96,97,98,99,66,67,56,57,6,7,8]);
+  const YEL   = new Set([10,11,12,28,40,41,42,43,44,45,46,47]);
+  const BLUE  = new Set([22,26,70,71,72,73,74,75,76,77,78,79,84,85,86]);
+  const MINT  = new Set([68,69,23]);
+  const BROWN = new Set([9,30,31,32,33,34,35,36,37,38,39]);
+  const BLACK = new Set([1,2,3,4,5]);
+
+  if (GREEN.has(c)) return "wx-green";
+  if (RED.has(c))   return "wx-red";
+  if (YEL.has(c))   return "wx-yellow";
+  if (BLUE.has(c))  return "wx-darkblue";
+  if (MINT.has(c))  return "wx-mint";
+  if (BROWN.has(c)) return "wx-brown";
+  if (BLACK.has(c)) return "";
+  return "";
+}
+
+/* N i piętra chmur */
+function iconN(N,iX){
+  if(Number.isInteger(N)) return png(`WeatherSymbol_WMO_TotalCloudCover_N_${N}.png`,"n");
+  if(iX!=null&&iX>=2) return png(`WeatherSymbol_WMO_TotalCloudCover_Automatic.png`,"n");
+  return png(`WeatherSymbol_WMO_TotalCloudCover_N_Slash.png`,"n");
+}
+const iconCH=c=>{c=norm09(c); return c!==null?png(`WeatherSymbol_WMO_CloudHigh_CH_${c}.png`,"ch"):"";};
+const iconCM=c=>{c=norm09(c); return c!==null?png(`WeatherSymbol_WMO_CloudMedium_CM_${c}.png`,"cm"):"";};
+const iconCL=c=>{c=norm09(c); return c!==null?png(`WeatherSymbol_WMO_CloudLow_CL_${c}.png`,"cl"):"";};
+
+/* Present weather (kolorowane ww) */
+function iconWW(ww,iX){
+  if(ww==null||isNaN(ww)) return "";
+  const cls = "ww "+wxClass(+ww);
+  const f2=String(ww).padStart(2,"0"), f1=String(+ww);
+  const files=(iX!=null&&iX>=2)
+    ? [`WeatherSymbol_WMO_PresentWeatherAutomaticStation_wawa_${f2}.png`,`WeatherSymbol_WMO_PresentWeatherAutomaticStation_wawa_${f1}.png`]
+    : [`WeatherSymbol_WMO_PresentWeather_ww_${f2}.png`,`WeatherSymbol_WMO_PresentWeather_ww_${f1}.png`];
+  return files.map(n=>png(n,cls)).join("");
+}
+
+/* Past weather — bez „DoubleSlash”; automatyczne i manualne */
+function iconPastManual(w, pos){
+  if(w==null||isNaN(w)) return "";
+  const d=+w;
+  if(d===3) return png(`WeatherSymbol_WMO_PastWeather_W1W2_3${pos===1?"a":"b"}.png`,"w"+pos);
+  if([4,5,6,7,8,9].includes(d)) return png(`WeatherSymbol_WMO_PastWeather_W1W2_${d}.png`,"w"+pos);
+  return "";
+}
+function iconPastAuto(w, pos){
+  if(w==null||isNaN(w)) return "";
+  const d=+w;
+  if(d===7) return png(`WeatherSymbol_WMO_PastWeatherAutomaticStation_Wa1Wa1_7${pos===1?"a":"b"}.png`,"w"+pos);
+  if(d>=1 && d<=9) return png(`WeatherSymbol_WMO_PastWeatherAutomaticStation_Wa1Wa1_${d}.png`,"w"+pos);
+  return "";
+}
+function iconW1(w,iX){ return (iX!=null&&iX>=2?iconPastAuto(w,1):iconPastManual(w,1)); }
+function iconW2(w,iX){ return (iX!=null&&iX>=2?iconPastAuto(w,2):iconPastManual(w,2)); }
+
+/* tendencja / wartości */
+function aClass(a){ if([1,2,3].includes(a))return"a-up"; if([5,6,7].includes(a))return"a-down"; return"a-flat"; }
+const iconA=a=>(a==null||isNaN(a)||a<1||a>8)?"":png(`WeatherSymbol_WMO_PressureTendencyCharacteristic_a_${a}.png`,"aicon");
+const pppValue=p=>(p==null||isNaN(p))?"":(p/10).toFixed(1);
+
+/* ICAO (jeśli brak w repo, po prostu się ukryją dzięki onerror) */
+function iconICAO(d){
+  const out=[];
+  const isDrz = c=>c!=null && [50,51,52,53,54,55,56,57,58,59].includes(+c);
+  const isFrz = c=>c!=null && [57,58,59,66,67].includes(+c);
+  if(isDrz(d.ww)||isDrz(d.W1)||isDrz(d.W2)) out.push(png("WeatherSymbol_ICAO_Drizzle.png","icao1"));
+  if(isFrz(d.ww)||isFrz(d.W1)||isFrz(d.W2)) out.push(png("WeatherSymbol_ICAO_FreezingPrecipitation.png","icao2"));
+  return out.join("");
+}
+
+/* ===== wiatr SVG ===== */
+function windBarbSVG(dd, ff_kt){
+  const W=96, H=76, cx=W/2, cy=H/2;
+  const rCore=10, len=26;
+  if(dd==null || isNaN(dd) || ff_kt==null || ff_kt<=0){
+    return `<svg viewBox="0 0 ${W} ${H}">
+      <circle cx="${cx}" cy="${cy}" r="${rCore-2}" fill="none" stroke="#000" stroke-width="2"/>
+    </svg>`;
+  }
+  const dir = dd*10, th = dir*Math.PI/180;
+  const ux=Math.sin(th), uy=-Math.cos(th), px=-uy, py=ux;
+  const x1=cx+ux*rCore, y1=cy+uy*rCore;
+  const x2=x1+ux*len,   y2=y1+uy*len;
+
+  let k = Math.round(ff_kt/5)*5;
+  const n50=Math.floor(k/50); k-=50*n50;
+  const n10=Math.floor(k/10); k-=10*n10;
+  const n5 =Math.floor(k/5);
+
+  const step=7, L10=14, L5=9, H50=14, back0=4;
+  const segs=[`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#000" stroke-width="2.2" stroke-linecap="round"/>`];
+  let back=back0;
+
+  for(let i=0;i<n50;i++){
+    const bx=x2-ux*back, by=y2-uy*back;
+    const tx=bx+px*H50,  ty=by+py*H50;
+    const ex=bx-ux*step, ey=by-uy*step;
+    segs.push(`<polygon points="${bx},${by} ${tx},${ty} ${ex},${ey}" fill="#000"/>`);
+    back+=step+2;
+  }
+  for(let i=0;i<n10;i++){
+    const bx=x2-ux*back, by=y2-uy*back;
+    const ex=bx+px*L10,  ey=by+py*L10;
+    segs.push(`<line x1="${bx}" y1="${by}" x2="${ex}" y2="${ey}" stroke="#000" stroke-width="2"/>`);
+    back+=step;
+  }
+  for(let i=0;i<n5;i++){
+    const bx=x2-ux*back, by=y2-uy*back;
+    const ex=bx+px*L5,   ey=by+py*L5;
+    segs.push(`<line x1="${bx}" y1="${by}" x2="${ex}" y2="${ey}" stroke="#000" stroke-width="2"/>`);
+    back+=step;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}">${segs.join("")}</svg>`;
+}
+
+/* ===== formaty + layout ===== */
+const hToMeters=h=>({0:50,1:100,2:200,3:300,4:600,5:1000,6:1500,7:2000,8:2500,9:3000}[h] ?? null);
+const ps3 = p => (p==null||isNaN(p)) ? "" : String(Math.round(p)).slice(-3).padStart(3,"0");
+
+function stationHTML(_,d){
+  const TT=d.T!=null?d.T.toFixed(1).replace(/\.0$/,""):"";
+  const TD=d.Td!=null?d.Td.toFixed(1).replace(/\.0$/,""):"";
+  const VV=d.VV??"";
+  const Puse=(d.Ps!=null?d.Ps:d.Pmsl);
+  const PPP3=ps3(Puse);
+  const baseM=hToMeters(d.h);
+  const nhLine=(d.Nh!=null?d.Nh:"")+"/8";
+  const baseLine=baseM!=null?String(baseM):"—";
+  const cls=aClass(d.a);
+
+  return `<div class="stn">
+    ${iconCH(d.CH)}
+    <div class="txt tt">${TT}</div>
+    ${iconCM(d.CM)}
+    <div class="txt ppp">${PPP3}</div>
+
+    <div class="txt vv">${VV}</div>
+    ${iconWW(d.ww,d.iX)}
+    ${iconICAO(d)}
+    ${iconN(d.N,d.iX)}
+    <div class="aBox ${cls}">${iconA(d.a)}<span class="aval">${pppValue(d.ppp)}</span></div>
+
+    <div class="txt td">${TD}</div>
+    ${iconCL(d.CL)}
+    ${iconW1(d.W1,d.iX)}
+    ${iconW2(d.W2,d.iX)}
+    <div class="txt nh">${nhLine}</div>
+    <div class="txt base">${baseLine}</div>
+
+    <div class="barb">${windBarbSVG(d.dd,d.ff_kt)}</div>
+  </div>`;
+}
+
+/* popup (diagnostyka) */
+const fmt=v=>(v==null||Number.isNaN(v))?"—":String(v);
+const pad2=n=>String(n).padStart(2,"0");
+const esc=s=>String(s).replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+function popup(name,d){
+  const L=[`<b>${name||("WMO "+(d.wmo||""))}</b>`,
+    `YYGGi_w: ${pad2(d.YY)}${pad2(d.GG)}${d.iw} • WMO: ${d.wmo||"—"}`,
+    `Wiatr: kierunek ${fmt(d.dd)}0°, prędkość ${fmt(d.ff_ms)} m/s (${fmt(d.ff_kt)} kt)`,
+    `Ps(stn)=${fmt(d.Ps)} hPa • MSLP=${fmt(d.Pmsl)} hPa`,
+    `T=${fmt(d.T)} °C, Td=${fmt(d.Td)} °C`,
+    `Tendencja: a=${fmt(d.a)}; ppp=${d.ppp!=null?(d.ppp/10).toFixed(1):"—"} hPa/3h`,
+    `Chmury: CL=${fmt(d.CL)} CM=${fmt(d.CM)} CH=${fmt(d.CH)} • N=${fmt(d.N)} • Nh=${fmt(d.Nh)} h=${fmt(hToMeters(d.h))}`,
+    `ww=${fmt(d.ww)} W1=${fmt(d.W1)} W2=${fmt(d.W2)}`
+  ];
+  return `<div class="mono">${L.join("<br>")}</div>`;
+}
+function place(lat,lon,label,d){
+  const icon=L.divIcon({className:"no-pad",html:stationHTML(label,d),iconSize:[96,76],iconAnchor:[48,38]});
+  L.marker([lat,lon],{icon}).addTo(layer).bindPopup(popup(label,d),{maxWidth:360});
+}
+
+/* ===== pipeline ===== */
+function run(blocks){
+  setStatus(`Bloki: ${blocks.length}`);
+  layer.clearLayers();
+  const best=new Map(); let decoded=0;
+  for(const b of blocks){
+    const d=decodeAAXX(b); if(!d||!d.wmo) continue; decoded++;
+    const k=String(d.wmo).padStart(5,"0"); const cur=best.get(k);
+    if(!cur || (d.GG!=null && (cur.GG==null || d.GG>cur.GG))) best.set(k,d);
+  }
+  if(best.size===0){ setStatus(`Bloki: ${blocks.length} • Brak zdekodowanych (sprawdź wejście)`); return; }
+  const pts=[];
+  for(const [k,d] of best){
+    const m=WMO_MAP.get(k); if(!m) continue;
+    place(m.lat,m.lon,m.name||("WMO "+k),d); pts.push([m.lat,m.lon]);
+  }
+  if(pts.length) map.fitBounds(pts,{padding:[40,40]});
+  setStatus(`Bloki: ${blocks.length} • Zdekodowane: ${decoded} • Naniesione: ${pts.length}`);
+}
+
+/* ===== akcje ===== */
+$("btnClear").onclick=()=>{layer.clearLayers();setStatus("Wyczyszczono.")};
+
+$("btnLoadWMO").onclick=async()=>{
+  const f=$("fileWMO").files[0]; if(!f){setStatus("Wybierz JSON WMO→stacja.");return;}
+  try{
+    const j=JSON.parse(await f.text());
+    WMO_MAP=new Map(Object.entries(j).map(([k,v])=>[String(k).padStart(5,"0"),v]));
+    setStatus("Wczytano WMO→stacja: "+WMO_MAP.size);
+  }catch(e){ setStatus("Błąd JSON: "+e.message); }
+};
+
+$("btnParseAAXX").onclick=async()=>{
+  const f=$("fileAAXX").files[0]; if(!f){setStatus("Wybierz plik AAXX.");return;}
+  const raw=await f.text();
+  const plain=toPlain(raw);
+  const blocks=extractAAXX(plain);
+  if(blocks.length===0){ setStatus("Nie znaleziono bloków AAXX w pliku."); return; }
+  run(blocks);
+};
+
+/* smart fetch – cofanie do 6 godzin wstecz */
+$("btnFetch").onclick=async()=>{
+  try{
+    setStatus("Pobieram AAXX…");
+    const useProxy=$("useProxy").checked;
+    let url=$("url").value.trim();
+    let blocks=[];
+    if(!url){
+      const now=new Date();
+      let t=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate(),now.getUTCHours(),0,0));
+      if(now.getUTCMinutes()<59) t.setUTCHours(t.getUTCHours()-1);
+      url=getsynopUrl(t);
+      $("url").value=url;
+    }
+    for(let i=0;i<6;i++){
+      const html=await fetchWithProxy(url,useProxy);
+      blocks=extractAAXX(toPlain(html));
+      if(blocks.length>0) break;
+      const m=/begin=(\d{12})/.exec(url);
+      const dt=m?new Date(Date.UTC(+m[1].slice(0,4),+m[1].slice(4,6)-1,+m[1].slice(6,8),+m[1].slice(8,10),0,0)):new Date();
+      dt.setUTCHours(dt.getUTCHours()-1);
+      url=getsynopUrl(dt);
+      setStatus(`Brak bloków, próbuję: ${url}`);
+    }
+    if(blocks.length===0){ setStatus("Brak bloków AAXX w odpowiedzi."); return; }
+    run(blocks);
+  }catch(e){ setStatus("Błąd pobierania: "+e.message); }
+};
+</script>
+</body>
+</html>
